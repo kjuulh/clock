@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-
-use chrono::NaiveDate;
+use chrono::Timelike;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -60,92 +58,54 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command.expect("to have a command available") {
         Commands::List { limit, project } => {
-            let days = timetable.group_by_day();
-            let days = days.iter().rev().take(limit).collect::<Vec<(_, _)>>();
+            let days = &timetable
+                .days
+                .iter()
+                .filter(|d| {
+                    if let Some(project) = &project {
+                        Some(project) == d.project.as_ref()
+                    } else {
+                        true
+                    }
+                })
+                .collect::<Vec<_>>();
+            let days = days.iter().rev().take(limit).collect::<Vec<_>>();
 
-            for (day, pairs) in days.iter() {
-                let hours = pairs
-                    .iter()
-                    .fold(
-                        (chrono::Duration::default(), None),
-                        |(total, last_in), ev| match ev.r#type {
-                            InOut::In => (total, Some(ev)),
-                            InOut::Out => {
-                                if let Some(in_time) = last_in {
-                                    if in_time.project == project {
-                                        (total + (ev.timestamp - in_time.timestamp), None)
-                                    } else {
-                                        (total, None)
-                                    }
-                                } else {
-                                    (total, None)
-                                }
-                            }
-                            InOut::Break => (total, last_in),
-                        },
-                    )
-                    .0;
-
-                let break_time =
-                    pairs
-                        .iter()
-                        .fold(chrono::TimeDelta::zero(), |acc, e| match e.r#type {
-                            InOut::Break => acc + chrono::Duration::minutes(30),
-                            _ => acc,
-                        });
-
+            for day in days {
                 println!(
-                    "{}: {}h{}m{} mins\n  {}",
-                    day,
-                    hours.num_hours(),
-                    hours.num_minutes() % 60,
-                    if break_time.num_minutes() > 0 {
-                        format!(", break: {}", break_time.num_minutes())
+                    "day: {}{}\n  {}:{}{}",
+                    day.clock_in.format("%Y/%m/%d"),
+                    if let Some(project) = &day.project {
+                        format!(" project: {}", project)
                     } else {
                         "".into()
                     },
-                    pairs
-                        .iter()
-                        .map(|d| format!(
-                            "{} - {}{}",
-                            d.timestamp.with_timezone(&chrono::Local).format("%H:%M"),
-                            match d.r#type {
-                                InOut::In => "clocked in ",
-                                InOut::Out => "clocked out",
-                                InOut::Break => "break",
-                            },
-                            if let Some(project) = &d.project {
-                                format!(" - project: {}", project)
-                            } else {
-                                "".into()
-                            }
-                        ))
-                        .collect::<Vec<String>>()
-                        .join("\n  ")
-                );
+                    day.clock_in.hour(),
+                    day.clock_in.minute(),
+                    if let Some(clockout) = &day.clock_out {
+                        format!(" - {}:{}", clockout.hour(), clockout.minute())
+                    } else {
+                        " - unclosed".into()
+                    }
+                )
             }
-        }
-        Commands::Break { project } => {
-            timetable.days.push(Day {
-                timestamp: now,
-                r#type: InOut::Break,
-                project,
-            });
         }
         Commands::In { project } => {
             timetable.days.push(Day {
-                timestamp: now,
-                r#type: InOut::In,
+                clock_in: now,
+                clock_out: None,
+                breaks: Vec::default(),
                 project,
             });
         }
-        Commands::Out { project } => {
-            timetable.days.push(Day {
-                timestamp: now,
-                r#type: InOut::Out,
-                project,
-            });
-        }
+        Commands::Out { project } => match timetable.get_day(project, now) {
+            Some(day) => day.clock_out = Some(now),
+            None => todo!(),
+        },
+        Commands::Break { project } => match timetable.get_day(project, now) {
+            Some(day) => day.breaks.push(Break {}),
+            None => todo!(),
+        },
     }
 
     if let Some(parent) = dir.parent() {
@@ -160,19 +120,16 @@ async fn main() -> anyhow::Result<()> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Day {
-    timestamp: chrono::DateTime<chrono::Utc>,
-    #[serde(rename = "type")]
-    r#type: InOut,
+    clock_in: chrono::DateTime<chrono::Utc>,
+    clock_out: Option<chrono::DateTime<chrono::Utc>>,
+
+    breaks: Vec<Break>,
 
     project: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-enum InOut {
-    In,
-    Out,
-    Break,
-}
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+struct Break {}
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 struct TimeTable {
@@ -180,21 +137,19 @@ struct TimeTable {
 }
 
 impl TimeTable {
-    /// Groups entries by calendar day in ascending order by timestamp
-    pub fn group_by_day(&self) -> BTreeMap<NaiveDate, Vec<&Day>> {
-        let mut grouped: BTreeMap<NaiveDate, Vec<&Day>> = BTreeMap::new();
+    pub fn get_day<'a>(
+        &'a mut self,
+        project: Option<String>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Option<&'a mut Day> {
+        let item = self.days.iter_mut().find(|d| {
+            if d.project == project {
+                return false;
+            }
 
-        // First pass: group entries by date
-        for day in &self.days {
-            let date = day.timestamp.date_naive();
-            grouped.entry(date).or_default().push(day);
-        }
+            d.clock_in.format("%Y-%m-%d").to_string() == now.format("%Y-%m-%d").to_string()
+        });
 
-        // Second pass: sort each day's entries by timestamp
-        for entries in grouped.values_mut() {
-            entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
-        }
-
-        grouped
+        item
     }
 }
