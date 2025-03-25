@@ -1,2 +1,2 @@
-# clockin
+# clock
 

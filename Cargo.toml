@@ -6,7 +6,7 @@ resolver = "2"
 version = "0.1.0"
 
 [workspace.dependencies]
-clockin = { path = "crates/clockin" }
+clock = { path = "crates/clock" }
 
 anyhow = { version = "1" }
 tokio = { version = "1", features = ["full"] }

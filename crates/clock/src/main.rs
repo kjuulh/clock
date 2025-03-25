@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
 
     let dir = dirs::data_dir()
         .expect("to be able to get a data dir")
-        .join("clockin")
+        .join("clock")
         .join("timetable.json");
 
     let mut timetable = if dir.exists() {

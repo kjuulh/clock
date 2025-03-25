@@ -3,13 +3,13 @@
 base: "git@git.front.kjuulh.io:kjuulh/cuddle-rust-cli-plan.git"
 
 vars:
-  service: "clockin"
+  service: "clock"
   registry: kasperhermansen
 
 please:
   project:
     owner: kjuulh
-    repository: "clockin"
+    repository: "clock"
     branch: "main"
   settings:
     api_url: "https://git.front.kjuulh.io"
