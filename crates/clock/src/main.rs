@@ -137,11 +137,11 @@ struct TimeTable {
 }
 
 impl TimeTable {
-    pub fn get_day<'a>(
-        &'a mut self,
+    pub fn get_day(
+        &mut self,
         project: Option<String>,
         now: chrono::DateTime<chrono::Utc>,
-    ) -> Option<&'a mut Day> {
+    ) -> Option<&mut Day> {
         let item = self.days.iter_mut().find(|d| {
             if d.project == project {
                 return false;
