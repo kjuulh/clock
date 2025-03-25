@@ -37,7 +37,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenv::dotenv().ok();
+    let _ = dotenvy::dotenv();
     tracing_subscriber::fmt::init();
 
     let cli = Command::parse();
