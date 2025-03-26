@@ -61,28 +61,31 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command.expect("to have a command available") {
         Commands::List { limit, project } => {
+            let mut timetable = timetable.clone();
             let days = &timetable
                 .days
-                .iter()
-                .filter(|d| {
+                .iter_mut()
+                .map(|d| {
                     if let Some(project) = &project {
-                        Some(project) == d.project.as_ref()
+                        d.entry = d
+                            .entry
+                            .iter()
+                            .filter(|d| d.project.as_ref() == Some(project))
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        d
                     } else {
-                        true
+                        d
                     }
                 })
+                .filter(|d| !d.entry.is_empty())
                 .collect::<Vec<_>>();
             let days = days.iter().rev().take(limit).collect::<Vec<_>>();
 
             for day in days {
                 println!(
-                    "{}{}{}\n  {}{}\n",
-                    day.clock_in.with_timezone(&Local {}).format("%Y-%m-%d"),
-                    if let Some(project) = &day.project {
-                        format!(" project: {}", project)
-                    } else {
-                        "".into()
-                    },
+                    "{}{}\n{}\n",
+                    day.date.format("%Y-%m-%d"),
                     if day.breaks.is_empty() {
                         "".into()
                     } else {
@@ -91,28 +94,64 @@ async fn main() -> anyhow::Result<()> {
                             day.breaks.iter().fold(0, |acc, _| acc + 30)
                         )
                     },
-                    day.clock_in.with_timezone(&Local {}).format("%H:%M"),
-                    if let Some(clockout) = &day.clock_out {
-                        format!(" - {}", clockout.with_timezone(&Local {}).format("%H:%M"))
-                    } else {
-                        " - unclosed".into()
-                    },
+                    day.entry
+                        .iter()
+                        .map(|e| {
+                            format!(
+                                " - {} - {}{}",
+                                e.clock_in.with_timezone(&Local {}).format("%H:%M"),
+                                if let Some(clockout) = &e.clock_out {
+                                    clockout
+                                        .with_timezone(&Local {})
+                                        .format("%H:%M")
+                                        .to_string()
+                                } else if day.date == now.date_naive() {
+                                    let working_hours = e.clock_in - now;
+                                    format!(
+                                        "unclosed, current hours: {}h{}m",
+                                        working_hours.num_hours().abs(),
+                                        working_hours.num_minutes().abs() % 60
+                                    )
+                                } else {
+                                    "unclosed".into()
+                                },
+                                if let Some(project) = &e.project {
+                                    format!(": project: {}", project)
+                                } else {
+                                    "".into()
+                                }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                 )
             }
         }
         Commands::In { project } => {
-            timetable.days.push(Day {
-                clock_in: now,
-                clock_out: None,
-                breaks: Vec::default(),
-                project,
-            });
+            match timetable.get_day(now) {
+                Some(d) => {
+                    d.entry.push(ClockIn {
+                        clock_in: now,
+                        clock_out: None,
+                        project,
+                    });
+                }
+                None => timetable.days.push(Day {
+                    entry: vec![ClockIn {
+                        clock_in: now,
+                        clock_out: None,
+                        project,
+                    }],
+                    breaks: Vec::default(),
+                    date: now.date_naive(),
+                }),
+            };
         }
-        Commands::Out { project } => match timetable.get_day(project, now) {
+        Commands::Out { project } => match timetable.get_day_entry(project, now) {
             Some(day) => day.clock_out = Some(now),
             None => todo!(),
         },
-        Commands::Break { project } => match timetable.get_day(project, now) {
+        Commands::Break { project } => match timetable.get_day(now) {
             Some(day) => day.breaks.push(Break {}),
             None => todo!(),
         },
@@ -120,6 +159,7 @@ async fn main() -> anyhow::Result<()> {
             let to_resolve = timetable
                 .days
                 .iter_mut()
+                .flat_map(|d| &mut d.entry)
                 .filter(|d| d.clock_out.is_none())
                 .collect::<Vec<_>>();
 
@@ -204,15 +244,18 @@ fn parse_string_to_time(v: &str) -> anyhow::Result<chrono::NaiveTime> {
         })
         .context("failed to parse int to hour")
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ClockIn {
+    clock_in: chrono::DateTime<chrono::Utc>,
+    clock_out: Option<chrono::DateTime<chrono::Utc>>,
+    project: Option<String>,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Day {
-    clock_in: chrono::DateTime<chrono::Utc>,
-    clock_out: Option<chrono::DateTime<chrono::Utc>>,
-
+    date: chrono::NaiveDate,
+    entry: Vec<ClockIn>,
     breaks: Vec<Break>,
-
-    project: Option<String>,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -224,12 +267,21 @@ struct TimeTable {
 }
 
 impl TimeTable {
-    pub fn get_day(
+    pub fn get_day(&mut self, now: chrono::DateTime<chrono::Utc>) -> Option<&mut Day> {
+        let item = self
+            .days
+            .iter_mut()
+            .find(|d| d.date.format("%Y-%m-%d").to_string() == now.format("%Y-%m-%d").to_string());
+
+        item
+    }
+
+    pub fn get_day_entry(
         &mut self,
         project: Option<String>,
         now: chrono::DateTime<chrono::Utc>,
-    ) -> Option<&mut Day> {
-        let item = self.days.iter_mut().find(|d| {
+    ) -> Option<&mut ClockIn> {
+        let item = self.days.iter_mut().flat_map(|d| &mut d.entry).find(|d| {
             if d.project != project {
                 return false;
             }
