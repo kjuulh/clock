@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2025-05-12
+
+### Added
+- add current hours
+
+### Fixed
+- *(deps)* update all dependencies
+
+### Other
+- *(deps)* update rust crate clap to v4.5.38
+- *(deps)* update all dependencies
+- *(deps)* update rust crate tokio to v1.44.2
+- *(deps)* update rust crate clap to v4.5.35
+- *(deps)* update rust crate clap to v4.5.34
+- *(deps)* update rust crate clap to v4.5.33
+
 ## [0.0.1] - 2025-03-25
 
 ### Added
